@@ -16,7 +16,7 @@ export async function GET() {
       SELECT COUNT(DISTINCT ei.livro_id) as count
       FROM emprestimo_itens ei
       JOIN emprestimos e ON e.id = ei.emprestimo_id
-      WHERE ei.devolvido = false AND e.devolvido = false
+      WHERE ei.devolvido = false AND e.status = 'ativo'
     `
 
     // Total de clientes
@@ -31,15 +31,15 @@ export async function GET() {
 
     // Empréstimos ativos
     const emprestimosAtivos = await sql`
-      SELECT COUNT(*) as count FROM emprestimos WHERE devolvido = false
+      SELECT COUNT(*) as count FROM emprestimos WHERE status = 'ativo'
     `
 
     // Empréstimos atrasados (mais de 30 dias)
     const emprestimosAtrasados = await sql`
       SELECT COUNT(*) as count 
       FROM emprestimos 
-      WHERE devolvido = false 
-      AND data_emprestimo < NOW() - INTERVAL '30 days'
+      WHERE status = 'ativo' 
+      AND data_devolucao_prevista < CURRENT_DATE
     `
 
     // Valores a receber (não pagos)
@@ -54,8 +54,8 @@ export async function GET() {
       SELECT 
         e.id,
         e.data_emprestimo,
-        e.data_devolucao,
-        e.devolvido,
+        e.data_devolucao_prevista as data_devolucao,
+        CASE WHEN e.status = 'devolvido' THEN true ELSE false END as devolvido,
         e.pago,
         c.nome as cliente_nome,
         (SELECT COUNT(*) FROM emprestimo_itens WHERE emprestimo_id = e.id) as total_livros

@@ -43,7 +43,9 @@ export default function DashboardPage() {
     refreshInterval: 30000,
   })
 
-  if (error) {
+  const hasError = error || (data && 'error' in data)
+
+  if (hasError) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -73,39 +75,39 @@ export default function DashboardPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard
                 title="Total de Livros"
-                value={data?.livros.total ?? 0}
+                value={data?.livros?.total ?? 0}
                 icon={BookOpen}
                 variant="primary"
-                description={`${data?.livros.disponiveis ?? 0} disponíveis`}
+                description={`${data?.livros?.disponiveis ?? 0} disponíveis`}
               />
               <StatCard
                 title="Livros Emprestados"
-                value={data?.livros.emprestados ?? 0}
+                value={data?.livros?.emprestados ?? 0}
                 icon={BookCopy}
               />
               <StatCard
                 title="Clientes Cadastrados"
-                value={data?.clientes.total ?? 0}
+                value={data?.clientes?.total ?? 0}
                 icon={Users}
                 variant="primary"
               />
               <StatCard
                 title="Clientes Bloqueados"
-                value={data?.clientes.bloqueados ?? 0}
+                value={data?.clientes?.bloqueados ?? 0}
                 icon={Ban}
-                variant={data?.clientes.bloqueados ? "destructive" : "default"}
+                variant={(data?.clientes?.bloqueados ?? 0) > 0 ? "destructive" : "default"}
               />
               <StatCard
                 title="Empréstimos Atrasados"
-                value={data?.emprestimos.atrasados ?? 0}
+                value={data?.emprestimos?.atrasados ?? 0}
                 icon={AlertTriangle}
-                variant={data?.emprestimos.atrasados ? "warning" : "default"}
+                variant={(data?.emprestimos?.atrasados ?? 0) > 0 ? "warning" : "default"}
               />
               <StatCard
                 title="Valores a Receber"
-                value={`R$ ${(data?.financeiro.receber ?? 0).toFixed(2)}`}
+                value={`R$ ${(data?.financeiro?.receber ?? 0).toFixed(2)}`}
                 icon={DollarSign}
-                variant={data?.financeiro.receber ? "warning" : "default"}
+                variant={(data?.financeiro?.receber ?? 0) > 0 ? "warning" : "default"}
               />
             </div>
 
