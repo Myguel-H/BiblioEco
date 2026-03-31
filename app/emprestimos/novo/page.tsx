@@ -49,35 +49,38 @@ export default function NovoEmprestimoPage() {
   }
 
   const handleSubmit = async () => {
-    if (!clienteSelecionado || livrosSelecionados.length === 0) return
+  if (!clienteSelecionado || livrosSelecionados.length === 0) return
 
-    setIsSubmitting(true)
-    setError(null)
+  setIsSubmitting(true)
+  setError(null)
 
-    try {
-      const res = await fetch("/api/emprestimos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cliente_id: clienteSelecionado.id,
-          livro_ids: livrosSelecionados,
-        }),
-      })
+  try {
+    // Preparar os dados no formato que o backend espera
+    const livrosParaEnviar = livrosSelecionados.map(id => ({ id }))
+    
+    const res = await fetch("/api/emprestimos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clienteId: clienteSelecionado.id,  // ← mudou de cliente_id para clienteId
+        livros: livrosParaEnviar,          // ← mudou de livro_ids para livros (array de objetos)
+      }),
+    })
 
-      if (!res.ok) {
-        const data = await res.json()
-        setError(data.error || "Erro ao criar empréstimo")
-        return
-      }
-
-      router.push("/emprestimos")
-    } catch (err) {
-      setError("Erro ao criar empréstimo")
-      console.error(err)
-    } finally {
-      setIsSubmitting(false)
+    if (!res.ok) {
+      const data = await res.json()
+      setError(data.error || "Erro ao criar empréstimo")
+      return
     }
+
+    router.push("/emprestimos")
+  } catch (err) {
+    setError("Erro ao criar empréstimo")
+    console.error(err)
+  } finally {
+    setIsSubmitting(false)
   }
+}
 
   return (
     <div className="min-h-screen bg-background">

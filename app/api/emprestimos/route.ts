@@ -1,98 +1,70 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sql } from "@/lib/db"
 
-const VALOR_EMPRESTIMO = 5.0
-const MAX_LIVROS_POR_EMPRESTIMO = 3
+// Definindo tipos
+interface LivroSelecionado {
+  id: number
+  titulo: string
+  quantidade: number
+}
+
+interface EmprestimoBody {
+  clienteId: number
+  livros: LivroSelecionado[]
+  dataDevolucaoPrevista?: string
+}
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const ativos = searchParams.get("ativos") === "true"
-    const clienteId = searchParams.get("cliente_id")
+    const clienteId = searchParams.get("clienteId")
 
     let emprestimos
-    if (ativos && clienteId) {
+
+    if (ativos) {
       emprestimos = await sql`
         SELECT 
           e.*,
           c.nome as cliente_nome,
-          c.status as cliente_status,
-          (SELECT json_agg(json_build_object(
-            'id', ei.id,
-            'livro_id', ei.livro_id,
-            'livro_titulo', l.titulo,
-            'danificado', ei.danificado,
-            'devolvido', ei.devolvido
-          ))
-          FROM emprestimo_itens ei
-          JOIN livros l ON l.id = ei.livro_id
-          WHERE ei.emprestimo_id = e.id) as itens
+          (
+            SELECT COUNT(*) 
+            FROM emprestimo_itens ei 
+            WHERE ei.emprestimo_id = e.id AND ei.devolvido = false
+          ) as itens_nao_devolvidos
         FROM emprestimos e
-        JOIN clientes c ON c.id = e.cliente_id
-        WHERE e.devolvido = false AND e.cliente_id = ${clienteId}
-        ORDER BY e.created_at DESC
-      `
-    } else if (ativos) {
-      emprestimos = await sql`
-        SELECT 
-          e.*,
-          c.nome as cliente_nome,
-          c.status as cliente_status,
-          (SELECT json_agg(json_build_object(
-            'id', ei.id,
-            'livro_id', ei.livro_id,
-            'livro_titulo', l.titulo,
-            'danificado', ei.danificado,
-            'devolvido', ei.devolvido
-          ))
-          FROM emprestimo_itens ei
-          JOIN livros l ON l.id = ei.livro_id
-          WHERE ei.emprestimo_id = e.id) as itens
-        FROM emprestimos e
-        JOIN clientes c ON c.id = e.cliente_id
-        WHERE e.devolvido = false
-        ORDER BY e.created_at DESC
+        LEFT JOIN clientes c ON e.cliente_id = c.id
+        WHERE e.data_devolucao_real IS NULL
+        ORDER BY e.data_emprestimo DESC
       `
     } else if (clienteId) {
       emprestimos = await sql`
         SELECT 
           e.*,
           c.nome as cliente_nome,
-          c.status as cliente_status,
-          (SELECT json_agg(json_build_object(
-            'id', ei.id,
-            'livro_id', ei.livro_id,
-            'livro_titulo', l.titulo,
-            'danificado', ei.danificado,
-            'devolvido', ei.devolvido
-          ))
-          FROM emprestimo_itens ei
-          JOIN livros l ON l.id = ei.livro_id
-          WHERE ei.emprestimo_id = e.id) as itens
+          (
+            SELECT COUNT(*) 
+            FROM emprestimo_itens ei 
+            WHERE ei.emprestimo_id = e.id AND ei.devolvido = false
+          ) as itens_nao_devolvidos
         FROM emprestimos e
-        JOIN clientes c ON c.id = e.cliente_id
-        WHERE e.cliente_id = ${clienteId}
-        ORDER BY e.created_at DESC
+        LEFT JOIN clientes c ON e.cliente_id = c.id
+        WHERE e.cliente_id = ${Number(clienteId)}
+        ORDER BY e.data_emprestimo DESC
       `
     } else {
       emprestimos = await sql`
         SELECT 
           e.*,
           c.nome as cliente_nome,
-          c.status as cliente_status,
-          (SELECT json_agg(json_build_object(
-            'id', ei.id,
-            'livro_id', ei.livro_id,
-            'livro_titulo', l.titulo,
-            'danificado', ei.danificado,
-            'devolvido', ei.devolvido
-          ))
-          FROM emprestimo_itens ei
-          JOIN livros l ON l.id = ei.livro_id
-          WHERE ei.emprestimo_id = e.id) as itens
+          (
+            SELECT COUNT(*) 
+            FROM emprestimo_itens ei 
+            WHERE ei.emprestimo_id = e.id AND ei.devolvido = false
+          ) as itens_nao_devolvidos
         FROM emprestimos e
-        JOIN clientes c ON c.id = e.cliente_id
-        ORDER BY e.created_at DESC
+        LEFT JOIN clientes c ON e.cliente_id = c.id
+        ORDER BY e.data_emprestimo DESC
       `
     }
 
@@ -103,85 +75,83 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// POST - Criar novo empréstimo (versão sem transação)
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { cliente_id, livro_ids } = body
+    const body: EmprestimoBody = await request.json()
+    const { clienteId, livros, dataDevolucaoPrevista } = body
 
-    if (!cliente_id) {
+    // Validações
+    if (!clienteId) {
       return NextResponse.json({ error: "Cliente é obrigatório" }, { status: 400 })
     }
 
-    if (!livro_ids || !Array.isArray(livro_ids) || livro_ids.length === 0) {
-      return NextResponse.json({ error: "Selecione pelo menos um livro" }, { status: 400 })
+    if (!livros || !Array.isArray(livros) || livros.length === 0) {
+      return NextResponse.json({ error: "Pelo menos um livro é obrigatório" }, { status: 400 })
     }
 
-    if (livro_ids.length > MAX_LIVROS_POR_EMPRESTIMO) {
-      return NextResponse.json(
-        { error: `Máximo de ${MAX_LIVROS_POR_EMPRESTIMO} livros por empréstimo` },
-        { status: 400 }
+    // Calcular data de devolução (padrão 30 dias se não informada)
+    const hoje = new Date()
+    const dataDevolucao = dataDevolucaoPrevista 
+      ? new Date(dataDevolucaoPrevista)
+      : new Date(hoje.setDate(hoje.getDate() + 30))
+
+    // 1. Criar o empréstimo
+    const emprestimoResult = await sql`
+      INSERT INTO emprestimos (
+        cliente_id,
+        data_emprestimo,
+        data_devolucao_prevista,
+        status,
+        created_at,
+        updated_at
       )
-    }
-
-    // Verificar se cliente está ativo
-    const cliente = await sql`SELECT * FROM clientes WHERE id = ${cliente_id}`
-    if (cliente.length === 0) {
-      return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 })
-    }
-    if (cliente[0].status === "bloqueado") {
-      return NextResponse.json({ error: "Cliente bloqueado não pode fazer empréstimos" }, { status: 400 })
-    }
-
-    // Verificar disponibilidade dos livros
-    for (const livroId of livro_ids) {
-      const livro = await sql`
-        SELECT 
-          l.*,
-          COALESCE(
-            l.quantidade - (
-              SELECT COUNT(*)
-              FROM emprestimo_itens ei
-              JOIN emprestimos e ON e.id = ei.emprestimo_id
-              WHERE ei.livro_id = l.id AND ei.devolvido = false AND e.devolvido = false
-            ), 
-            l.quantidade
-          ) as quantidade_disponivel
-        FROM livros l
-        WHERE l.id = ${livroId}
-      `
-      if (livro.length === 0) {
-        return NextResponse.json({ error: `Livro ${livroId} não encontrado` }, { status: 404 })
-      }
-      if (livro[0].quantidade_disponivel <= 0) {
-        return NextResponse.json(
-          { error: `Livro "${livro[0].titulo}" não está disponível` },
-          { status: 400 }
-        )
-      }
-    }
-
-    // Calcular data de devolução (30 dias)
-    const dataDevolucao = new Date()
-    dataDevolucao.setDate(dataDevolucao.getDate() + 30)
-
-    // Criar empréstimo
-    const emprestimo = await sql`
-      INSERT INTO emprestimos (cliente_id, data_devolucao, valor, pago, devolvido)
-      VALUES (${cliente_id}, ${dataDevolucao.toISOString()}, ${VALOR_EMPRESTIMO}, false, false)
+      VALUES (
+        ${clienteId},
+        ${new Date()},
+        ${dataDevolucao},
+        'ativo',
+        NOW(),
+        NOW()
+      )
       RETURNING *
     `
+    
+    const emprestimo = emprestimoResult[0]
 
-    // Criar itens do empréstimo
-    for (const livroId of livro_ids) {
+    if (!emprestimo) {
+      throw new Error("Falha ao criar empréstimo")
+    }
+
+    // 2. Criar os itens do empréstimo
+    for (const livro of livros) {
       await sql`
-        INSERT INTO emprestimo_itens (emprestimo_id, livro_id, danificado, devolvido)
-        VALUES (${emprestimo[0].id}, ${livroId}, false, false)
+        INSERT INTO emprestimo_itens (
+          emprestimo_id,
+          livro_id,
+          devolvido,
+          created_at
+        )
+        VALUES (
+          ${emprestimo.id},
+          ${livro.id},
+          false,
+          NOW()
+        )
       `
     }
 
-    return NextResponse.json(emprestimo[0], { status: 201 })
-  } catch (error) {
-    console.error("Erro ao criar empréstimo:", error)
-    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 })
+    return NextResponse.json({ 
+      success: true, 
+      emprestimo: emprestimo,
+      message: "Empréstimo criado com sucesso!" 
+    }, { status: 201 })
+
+  } catch (error: any) {
+    console.error("Erro detalhado ao criar empréstimo:", error)
+    return NextResponse.json({ 
+      error: "Erro ao criar empréstimo",
+      details: error?.message || "Erro desconhecido"
+    }, { status: 500 })
   }
 }
