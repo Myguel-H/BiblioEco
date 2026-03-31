@@ -8,6 +8,7 @@ export async function GET(request: NextRequest) {
     const disponivel = searchParams.get("disponivel")
 
     let livros
+    
     if (search) {
       livros = await sql`
         SELECT 
@@ -17,7 +18,9 @@ export async function GET(request: NextRequest) {
               SELECT COUNT(*)
               FROM emprestimo_itens ei
               JOIN emprestimos e ON e.id = ei.emprestimo_id
-              WHERE ei.livro_id = l.id AND ei.devolvido = false AND e.devolvido = false
+              WHERE ei.livro_id = l.id 
+                AND ei.devolvido = false
+                AND e.data_devolucao_real IS NULL
             ), 
             l.quantidade
           ) as quantidade_disponivel
@@ -34,7 +37,9 @@ export async function GET(request: NextRequest) {
               SELECT COUNT(*)
               FROM emprestimo_itens ei
               JOIN emprestimos e ON e.id = ei.emprestimo_id
-              WHERE ei.livro_id = l.id AND ei.devolvido = false AND e.devolvido = false
+              WHERE ei.livro_id = l.id 
+                AND ei.devolvido = false
+                AND e.data_devolucao_real IS NULL
             ), 
             l.quantidade
           ) as quantidade_disponivel
@@ -43,9 +48,9 @@ export async function GET(request: NextRequest) {
       `
     }
 
-    if (disponivel === "true") {
-      livros = livros.filter((l: { quantidade_disponivel: number }) => l.quantidade_disponivel > 0)
-    }
+  //  if (disponivel === "true") {
+   //   livros = livros.filter((l: { quantidade_disponivel: number }) => l.quantidade_disponivel > 0)
+   // }
 
     return NextResponse.json(livros)
   } catch (error) {
@@ -57,7 +62,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { titulo, quantidade } = body
+    const { titulo, autor, isbn, quantidade, categoria, localizacao } = body
 
     if (!titulo || titulo.trim() === "") {
       return NextResponse.json({ error: "Título é obrigatório" }, { status: 400 })
@@ -69,9 +74,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Quantidade deve ser pelo menos 1" }, { status: 400 })
     }
 
+    // Inserir o livro - sem quantidade_disponível
     const livro = await sql`
-      INSERT INTO livros (titulo, quantidade)
-      VALUES (${titulo.trim()}, ${qtd})
+      INSERT INTO livros (
+        titulo, 
+        autor, 
+        isbn, 
+        quantidade, 
+        categoria, 
+        localizacao,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        ${titulo.trim()}, 
+        ${autor || null}, 
+        ${isbn || null}, 
+        ${qtd}, 
+        ${categoria || null}, 
+        ${localizacao || null},
+        NOW(),
+        NOW()
+      )
       RETURNING *
     `
 

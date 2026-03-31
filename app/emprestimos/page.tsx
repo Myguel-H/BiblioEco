@@ -15,33 +15,51 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Plus, BookCopy, Check, DollarSign } from "lucide-react"
-import type { Emprestimo, EmprestimoItem } from "@/lib/types"
+import type { EmprestimoComDetalhes, EmprestimoItemComLivro } from "@/lib/types"
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
-interface EmprestimoComItens extends Emprestimo {
-  cliente_nome: string
-  cliente_status: string
-  itens: EmprestimoItem[]
-}
-
 export default function EmprestimosPage() {
   const [showAtivos, setShowAtivos] = useState(true)
-  const [devolucaoDialog, setDevolucaoDialog] = useState<EmprestimoComItens | null>(null)
+  const [devolucaoDialog, setDevolucaoDialog] = useState<EmprestimoComDetalhes | null>(null)
   const [itensDanificados, setItensDanificados] = useState<number[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const { data: emprestimos, error, mutate } = useSWR<EmprestimoComItens[]>(
+  const { data: emprestimos, error, mutate } = useSWR<EmprestimoComDetalhes[]>(
     `/api/emprestimos${showAtivos ? "?ativos=true" : ""}`,
     fetcher
   )
+
+  // Função auxiliar para formatar valor
+// Função auxiliar para formatar valor - mais robusta
+const formatarValor = (valor: any): string => {
+  // Se for null ou undefined
+  if (valor === null || valor === undefined) return "0,00"
+  
+  // Se for número
+  if (typeof valor === 'number') {
+    return valor.toFixed(2).replace(".", ",")
+  }
+  
+  // Se for string
+  if (typeof valor === 'string') {
+    // Remove R$ e espaços se existir
+    const numeroLimpo = valor.replace(/R\$\s*/g, '').replace(/\./g, '').replace(/,/g, '.')
+    const num = parseFloat(numeroLimpo)
+    if (isNaN(num)) return "0,00"
+    return num.toFixed(2).replace(".", ",")
+  }
+  
+  // Se for qualquer outra coisa
+  return "0,00"
+}
 
   const handleDevolucao = async () => {
     if (!devolucaoDialog) return
 
     setIsSubmitting(true)
     try {
-      await fetch(`/api/emprestimos/${devolucaoDialog.id}`, {
+      const response = await fetch(`/api/emprestimos/${devolucaoDialog.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -49,9 +67,12 @@ export default function EmprestimosPage() {
           itens_danificados: itensDanificados,
         }),
       })
-      setDevolucaoDialog(null)
-      setItensDanificados([])
-      mutate()
+
+      if (response.ok) {
+        setDevolucaoDialog(null)
+        setItensDanificados([])
+        mutate()
+      }
     } catch (error) {
       console.error("Erro ao registrar devolução:", error)
     } finally {
@@ -61,12 +82,15 @@ export default function EmprestimosPage() {
 
   const marcarPago = async (id: number) => {
     try {
-      await fetch(`/api/emprestimos/${id}`, {
+      const response = await fetch(`/api/emprestimos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pago: true }),
       })
-      mutate()
+
+      if (response.ok) {
+        mutate()
+      }
     } catch (error) {
       console.error("Erro ao marcar como pago:", error)
     }
@@ -140,8 +164,9 @@ export default function EmprestimosPage() {
               <div className="divide-y">
                 {emprestimos.map((emp) => {
                   const dataEmprestimo = new Date(emp.data_emprestimo)
-                  const dataDevolucao = new Date(emp.data_devolucao)
-                  const isAtrasado = !emp.devolvido && dataDevolucao < new Date()
+                  const dataDevolucaoPrevista = new Date(emp.data_devolucao_prevista)
+                  const isDevolvido = emp.data_devolucao_real !== null
+                  const isAtrasado = !isDevolvido && dataDevolucaoPrevista < new Date()
                   const livros = emp.itens?.map((i) => i.livro_titulo).join(", ") || "N/A"
 
                   return (
@@ -160,13 +185,13 @@ export default function EmprestimosPage() {
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               Emprestado em {dataEmprestimo.toLocaleDateString("pt-BR")} | 
-                              Devolução até {dataDevolucao.toLocaleDateString("pt-BR")}
+                              Devolução até {dataDevolucaoPrevista.toLocaleDateString("pt-BR")}
                             </p>
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <div className="flex items-center gap-2">
-                            {emp.devolvido ? (
+                            {isDevolvido ? (
                               <StatusBadge status="devolvido" />
                             ) : isAtrasado ? (
                               <StatusBadge status="atrasado" />
@@ -176,10 +201,12 @@ export default function EmprestimosPage() {
                             {emp.pago ? (
                               <span className="text-xs text-primary">Pago</span>
                             ) : (
-                              <span className="text-xs text-warning">R$ {emp.valor.toFixed(2)}</span>
+                              <span className="text-xs text-warning">
+                                R$ {formatarValor(emp.valor)}
+                              </span>
                             )}
                           </div>
-                          {!emp.devolvido && (
+                          {!isDevolvido && (
                             <div className="flex gap-1">
                               {!emp.pago && (
                                 <Button
